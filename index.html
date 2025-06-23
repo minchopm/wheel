@@ -61,6 +61,7 @@
     }
     .start-button:active { transform: scale(0.95); }
     .start-button.disabled { cursor: not-allowed; background-color: #ccc; color: #888; }
+
     .stats-container {
       margin-top: 20px;
       padding: 15px 25px;
@@ -107,7 +108,6 @@
   <div class="start-button" id="startButton">Старт</div>
 </div>
 
-<!-- НОВ HTML блок за статистиките -->
 <div class="stats-container">
   <div>Оставащи завъртания: <span id="spinCounter">10</span></div>
   <div>Обща печалба: <span id="totalWinningsDisplay">0</span> лв.</div>
@@ -158,10 +158,33 @@
     const riggedSector1 = 4;
     const riggedSector2 = 9;
     const freeSpinsSectorIndex = 7;
-    const spinPlan = [
-      riggedSector1, getRandomNonRiggedSector(), riggedSector2, riggedSector1, getRandomNonRiggedSector(),
-      riggedSector2, getRandomNonRiggedSector(), riggedSector1, getRandomNonRiggedSector(), getRandomNonRiggedSector()
-    ];
+    const RANDOM_SPIN = -1;
+
+    function createShuffledPlan() {
+      const planTemplate = [
+        riggedSector1, riggedSector1, riggedSector1,
+        riggedSector2, riggedSector2,
+        RANDOM_SPIN, RANDOM_SPIN, RANDOM_SPIN, RANDOM_SPIN, RANDOM_SPIN
+      ];
+
+      let plan;
+      let isValid = false;
+      while (!isValid) {
+        plan = planTemplate.sort(() => Math.random() - 0.5);
+        isValid = true;
+        for (let i = 0; i < plan.length - 1; i++) {
+          const currentIsRigged = plan[i] !== RANDOM_SPIN;
+          const nextIsRigged = plan[i+1] !== RANDOM_SPIN;
+          if (currentIsRigged && nextIsRigged) {
+            isValid = false;
+            break;
+          }
+        }
+      }
+      return plan;
+    }
+
+    const spinPlan = createShuffledPlan();
 
     let currentRotationRad = 0;
     let isSpinning = false;
@@ -176,11 +199,9 @@
       ctx.translate(centerX, centerY);
       ctx.rotate(-Math.PI / 2);
       ctx.rotate(rotationAngleRad);
-
       sectors.forEach((sector, i) => {
         const startAngle = i * SECTOR_ANGLE_RAD;
         const endAngle = (i + 1) * SECTOR_ANGLE_RAD;
-
         ctx.beginPath();
         ctx.moveTo(0, 0);
         ctx.arc(0, 0, radius, startAngle, endAngle);
@@ -190,11 +211,9 @@
         ctx.strokeStyle = '#333';
         ctx.lineWidth = 2;
         ctx.stroke();
-
         drawSectorText(sector, startAngle + SECTOR_ANGLE_RAD / 2);
       });
       ctx.restore();
-
       ctx.beginPath();
       ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
       ctx.strokeStyle = '#333';
@@ -219,8 +238,9 @@
 
     function getRandomNonRiggedSector() {
       let randomIndex;
-      do { randomIndex = Math.floor(Math.random() * NUM_SECTORS); }
-      while (randomIndex === riggedSector1 || randomIndex === riggedSector2 || randomIndex === freeSpinsSectorIndex);
+      do {
+        randomIndex = Math.floor(Math.random() * NUM_SECTORS);
+      } while (randomIndex === riggedSector1 || randomIndex === riggedSector2);
       return randomIndex;
     }
 
@@ -240,17 +260,26 @@
 
       let targetSectorIndex;
       if (freeSpinsCount > 0) {
-        do { targetSectorIndex = Math.floor(Math.random() * NUM_SECTORS); }
-        while(targetSectorIndex === freeSpinsSectorIndex);
+        do {
+          targetSectorIndex = Math.floor(Math.random() * NUM_SECTORS);
+        } while (targetSectorIndex === freeSpinsSectorIndex);
       } else {
         const spinNumber = TOTAL_SPINS - remainingSpins - 1;
-        targetSectorIndex = spinPlan[spinNumber];
+        const spinInstruction = spinPlan[spinNumber];
+
+        if (spinInstruction === RANDOM_SPIN) {
+          targetSectorIndex = getRandomNonRiggedSector();
+        } else {
+          targetSectorIndex = spinInstruction;
+        }
       }
 
       const targetSector = sectors[targetSectorIndex];
+
       const fullRotations = 5 * (Math.PI * 2);
       const targetAngle = targetSectorIndex * SECTOR_ANGLE_RAD + SECTOR_ANGLE_RAD / 2;
       const finalRotationTarget = fullRotations - targetAngle;
+
       const duration = 5000;
       const startRotation = currentRotationRad;
       const changeInRotation = finalRotationTarget - startRotation;
@@ -259,15 +288,11 @@
       function animate(currentTime) {
         if (startTime === null) startTime = currentTime;
         const elapsedTime = currentTime - startTime;
-
         const easeOut = (t) => 1 - Math.pow(1 - t, 4);
         const progress = Math.min(elapsedTime / duration, 1);
         const easedProgress = easeOut(progress);
-
         const newRotation = startRotation + changeInRotation * easedProgress;
-
         drawWheel(newRotation);
-
         if (progress < 1) {
           requestAnimationFrame(animate);
         } else {
