@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Колело на Късмета (Финална Версия)</title>
+  <title>Колело на Късмета</title>
   <style>
     body {
       display: flex;
@@ -155,36 +155,72 @@
       { value: 75, label: "75лв." }, { value: 45, label: "45лв." },
     ];
 
-    const riggedSector1 = 4;
-    const riggedSector2 = 9;
-    const freeSpinsSectorIndex = 7;
-    const RANDOM_SPIN = -1;
+    function shuffleWithoutConsecutiveDuplicates(array, maxRetries = 20) {
+      for (let retry = 0; retry < maxRetries; retry++) {
+        const source = [...array];
+        const result = [];
+        let lastItem = null;
+        let possible = true;
 
-    function createShuffledPlan() {
-      const planTemplate = [
-        riggedSector1, riggedSector1, riggedSector1,
-        riggedSector2, riggedSector2,
-        RANDOM_SPIN, RANDOM_SPIN, RANDOM_SPIN, RANDOM_SPIN, RANDOM_SPIN
-      ];
+        while (source.length > 0) {
+          const availableItems = source.filter(item => item !== lastItem);
 
-      let plan;
-      let isValid = false;
-      while (!isValid) {
-        plan = planTemplate.sort(() => Math.random() - 0.5);
-        isValid = true;
-        for (let i = 0; i < plan.length - 1; i++) {
-          const currentIsRigged = plan[i] !== RANDOM_SPIN;
-          const nextIsRigged = plan[i+1] !== RANDOM_SPIN;
-          if (currentIsRigged && nextIsRigged) {
-            isValid = false;
+          if (availableItems.length === 0) {
+            possible = false;
             break;
           }
+
+          const chosenItem = availableItems[Math.floor(Math.random() * availableItems.length)];
+          result.push(chosenItem);
+          lastItem = chosenItem;
+
+          const indexToRemove = source.findIndex(item => item === chosenItem);
+          source.splice(indexToRemove, 1);
+        }
+
+        if (possible) {
+          return result;
         }
       }
-      return plan;
+
+      return array.sort(() => Math.random() - 0.5);
     }
 
-    const spinPlan = createShuffledPlan();
+    function createSpinPlan() {
+      let allNumericValues = [...new Set(sectors.filter(s => typeof s.value === 'number').map(s => s.value))];
+      allNumericValues.sort(() => Math.random() - 0.5);
+
+      if (allNumericValues.length < 10) {
+        return { main: [], free: [] };
+      }
+
+      const repeatingValues = allNumericValues.splice(0, 2);
+      const [valX, valY] = repeatingValues;
+
+      let singlePrizePool = [...allNumericValues, "FreeSpins"];
+      singlePrizePool.sort(() => Math.random() - 0.5);
+
+      const singlePrizes = singlePrizePool.splice(0, 5);
+      const [prizeA, prizeB, prizeC, prizeD, prizeE] = singlePrizes;
+
+      const initialPlan = [
+        valX, valX, valX,
+        valY, valY,
+        prizeA,
+        prizeB,
+        prizeC,
+        prizeD,
+        prizeE
+      ];
+
+      const mainPlan = shuffleWithoutConsecutiveDuplicates(initialPlan);
+
+      const freePlan = singlePrizePool.filter(p => typeof p === 'number').slice(0, 3);
+      return { main: mainPlan, free: freePlan };
+    }
+
+    const { main: spinPlan, free: precalculatedFreeSpins } = createSpinPlan();
+    let freeSpinPlan = [];
 
     let currentRotationRad = 0;
     let isSpinning = false;
@@ -236,14 +272,6 @@
       ctx.restore();
     }
 
-    function getRandomNonRiggedSector() {
-      let randomIndex;
-      do {
-        randomIndex = Math.floor(Math.random() * NUM_SECTORS);
-      } while (randomIndex === riggedSector1 || randomIndex === riggedSector2);
-      return randomIndex;
-    }
-
     function spinWheel() {
       if (isSpinning) return;
       if (remainingSpins <= 0 && freeSpinsCount <= 0) {
@@ -255,25 +283,28 @@
       isSpinning = true;
       startButton.classList.add('disabled');
 
-      if (freeSpinsCount <= 0) remainingSpins--;
+      if (freeSpinsCount <= 0) {
+        remainingSpins--;
+      }
       updateStats();
 
-      let targetSectorIndex;
+      let targetValue;
+
       if (freeSpinsCount > 0) {
-        do {
-          targetSectorIndex = Math.floor(Math.random() * NUM_SECTORS);
-        } while (targetSectorIndex === freeSpinsSectorIndex);
+        targetValue = freeSpinPlan.pop();
       } else {
         const spinNumber = TOTAL_SPINS - remainingSpins - 1;
-        const spinInstruction = spinPlan[spinNumber];
-
-        if (spinInstruction === RANDOM_SPIN) {
-          targetSectorIndex = getRandomNonRiggedSector();
-        } else {
-          targetSectorIndex = spinInstruction;
-        }
+        targetValue = spinPlan[spinNumber];
       }
 
+      const possibleIndices = [];
+      sectors.forEach((sector, index) => {
+        if (sector.value === targetValue) {
+          possibleIndices.push(index);
+        }
+      });
+
+      const targetSectorIndex = possibleIndices[Math.floor(Math.random() * possibleIndices.length)];
       const targetSector = sectors[targetSectorIndex];
 
       const fullRotations = 5 * (Math.PI * 2);
@@ -306,6 +337,16 @@
     function handleSpinResult(winningSector) {
       isSpinning = false;
 
+      if (winningSector.value === "FreeSpins") {
+        freeSpinsCount = 3;
+        totalFreeSpinWinnings = 0;
+        freeSpinPlan = [...precalculatedFreeSpins].reverse();
+
+        showPopup("Честито!", "Спечелихте 3 безплатни завъртания! Те започват сега.", 3000);
+        setTimeout(spinWheel, 3100);
+        return;
+      }
+
       if (freeSpinsCount > 0) {
         totalFreeSpinWinnings += winningSector.value;
         freeSpinsCount--;
@@ -323,27 +364,26 @@
           if (remainingSpins > 0) startButton.classList.remove('disabled');
         }
       } else {
-        if (winningSector.value === "FreeSpins") {
-          freeSpinsCount = 3;
-          showPopup("Честито!", "Спечелихте 3 безплатни завъртания! Те започват сега.", 3000);
-          setTimeout(spinWheel, 3100);
-        } else {
-          totalWinnings += winningSector.value;
-          updateStats();
-          popupTitle.textContent = "Поздравления!";
-          popupMessage.textContent = `Вие спечелихте ${winningSector.label}`;
-          popupOverlay.style.display = 'flex';
-          if (remainingSpins > 0) startButton.classList.remove('disabled');
-        }
+        totalWinnings += winningSector.value;
+        updateStats();
+        popupTitle.textContent = "Поздравления!";
+        popupMessage.textContent = `Вие спечелихте ${winningSector.label}`;
+        popupOverlay.style.display = 'flex';
+        if (remainingSpins > 0) startButton.classList.remove('disabled');
       }
 
       if (remainingSpins <= 0 && freeSpinsCount <= 0) {
         startButton.classList.add('disabled');
+        setTimeout(() => {
+          if (popupOverlay.style.display === 'none' || popupMessage.textContent.includes("Безплатно завъртане")) {
+            showPopup("Край на играта!", `Вашата обща печалба е ${totalWinnings} лв.`);
+          }
+        }, 1500);
       }
     }
 
     function updateStats() {
-      spinCounterDisplay.textContent = remainingSpins;
+      spinCounterDisplay.textContent = Math.max(0, remainingSpins);
       totalWinningsDisplay.textContent = totalWinnings;
     }
 
